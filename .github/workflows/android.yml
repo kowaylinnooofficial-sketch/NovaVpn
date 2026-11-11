@@ -1,0 +1,120 @@
+name: NovaVPN Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: novavpn-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Xray AAR and Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout NovaVPN
+        uses: actions/checkout@v4
+        with:
+          path: NovaVPN
+
+      - name: Checkout official libXray
+        uses: actions/checkout@v4
+        with:
+          repository: XTLS/libXray
+          ref: 5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3
+          path: libXray-src
+
+      # Java must be available before Android SDK tools are initialized.
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             git make gcc g++ pkg-config
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses
+          sdkmanager --install             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"             "ndk;27.2.12479018"
+          test -d "${ANDROID_HOME}/platforms/android-35"
+          test -d "${ANDROID_HOME}/ndk/27.2.12479018"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Build official libXray Android AAR
+        working-directory: libXray-src
+        shell: bash
+        env:
+          LIBXRAY_ANDROID_API: '26'
+          LIBXRAY_GOMOBILE_VERSION: 'latest'
+        run: |
+          set -euxo pipefail
+          test -d "$ANDROID_NDK_HOME"
+          go version
+          python3 --version
+          python3 build/main.py android
+          test -s libXray.aar
+          mkdir -p ../NovaVPN/app/libs
+          cp libXray.aar ../NovaVPN/app/libs/libXray.aar
+          test -s ../NovaVPN/app/libs/libXray.aar
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify project files
+        working-directory: NovaVPN
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          test -s app/libs/libXray.aar
+
+      - name: Build debug APK
+        working-directory: NovaVPN
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaVPN-Xray-debug-apk
+          path: NovaVPN/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
