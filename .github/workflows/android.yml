@@ -33,8 +33,7 @@ jobs:
           ref: 5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3
           path: libXray-src
 
-      # Java must be available before Android SDK tools are initialized.
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -54,21 +53,28 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             git make gcc g++ pkg-config
+          sudo apt-get install -y --no-install-recommends git make gcc g++ pkg-config
 
+      # Install SDK components in one action instead of running sdkmanager separately.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          api-level: 35
+          build-tools: '35.0.0'
+          ndk: '27.2.12479018'
+          cmake: '3.22.1'
+          accept-android-sdk-licenses: true
 
-      - name: Install Android SDK packages
+      - name: Verify Android SDK
         shell: bash
         run: |
           set -euxo pipefail
-          yes | sdkmanager --licenses
-          sdkmanager --install             "platform-tools"             "platforms;android-35"             "build-tools;35.0.0"             "ndk;27.2.12479018"
+          echo "ANDROID_HOME=${ANDROID_HOME}"
           test -d "${ANDROID_HOME}/platforms/android-35"
+          test -d "${ANDROID_HOME}/build-tools/35.0.0"
           test -d "${ANDROID_HOME}/ndk/27.2.12479018"
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/27.2.12479018" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/27.2.12479018" >> "${GITHUB_ENV}"
 
       - name: Build official libXray Android AAR
         working-directory: libXray-src
@@ -78,7 +84,7 @@ jobs:
           LIBXRAY_GOMOBILE_VERSION: 'latest'
         run: |
           set -euxo pipefail
-          test -d "$ANDROID_NDK_HOME"
+          test -d "${ANDROID_NDK_HOME}"
           go version
           python3 --version
           python3 build/main.py android
